@@ -5,6 +5,7 @@ import {
   TEST_ADDRESS,
   USER_FIXABLE_TX_ERRORS,
   acknowledgeRiskDisclosure,
+  FAKE_VAULTS,
 } from "./fixtures";
 
 // meridian-usdc is the real testnet-deployed coordinator vault (see
@@ -20,6 +21,11 @@ const FAKE_POSITION = {
 };
 
 test.describe("withdraw", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/v1/vaults", (route) =>
+      route.fulfill({ json: FAKE_VAULTS })
+    );
+  });
   test("builds a real withdraw transaction against the real API", async ({
     page,
     mockWallet,
