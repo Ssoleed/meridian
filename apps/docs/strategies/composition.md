@@ -55,6 +55,36 @@ using `/` (e.g. `outer/inner`). Each member receives a `MemberPortfolioView`
 containing only its own positions, while cash and total portfolio valuation
 remain consistent views of the shared ledger.
 
+### 1.3 Composition constraints
+
+`ComposedStrategy` optionally accepts composition-wide limits. The validator
+checks the post-trade composition, meaning current positions plus the orders
+returned by members at current marks.
+
+```typescript
+const composed = new ComposedStrategy(members, {
+  constraints: {
+    maxMemberCount: 4,
+    maxMemberWeight: FixedPointDecimal.fromString("0.6"),
+    maxAggregateExposure: FixedPointDecimal.fromString("0.5"),
+    minCashBuffer: FixedPointDecimal.fromString("0.1"),
+  },
+  mode: "reject",
+});
+```
+
+| Constraint             | Meaning                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `maxMemberWeight`      | Maximum share of total value in one member's gross positions   |
+| `maxAggregateExposure` | Maximum share of total value in one asset across all members   |
+| `maxMemberCount`       | Maximum number of members                                      |
+| `minCashBuffer`        | Minimum share of total value that remains in cash after orders |
+
+`mode` defaults to `reject`, which throws `CompositionConstraintError` and
+names every violation. `mode: "clamp"` trims aggregate-exposure orders to the
+available limit. Member-count, member-weight, cash-buffer, and already-breached
+exposure limits are rejected because trimming orders cannot guarantee them.
+
 ## 2. Capital allocation logic
 
 When initializing members, capital is distributed across members according to
@@ -62,10 +92,9 @@ their normalized target weights.
 
 ### 2.1 Apportionment and exact capital conservation
 
-In current versions, `ComposedStrategy` initializes each member using
-`startingCapital.mul(member.allocation)`, while `allocateCapital` is available
-as a standalone helper in `@meridian/strategies` to compute exact capital
-conservation using Hamilton's largest-remainder apportionment rule:
+`ComposedStrategy` allocates its starting capital with `allocateCapital`,
+which uses Hamilton's largest-remainder apportionment to compute exact capital
+conservation:
 
 $$\sum \text{Member Capital} = \text{Total Initial Capital}$$
 

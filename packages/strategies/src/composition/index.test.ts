@@ -4,10 +4,11 @@ import { SimulationClock, ONE_HOUR_MS } from "../clock";
 import { BacktestPriceFeed } from "../feeds";
 import { ZERO_COSTS } from "../costs";
 import type { AccrualConfig } from "../backtest";
-import type { Strategy } from "../strategy";
+import type { PortfolioView, PositionView, Strategy } from "../strategy";
 import { BuyAndHoldStrategy } from "../strategy";
 import { FixedPointDecimal } from "../types";
 import type { AssetSymbol } from "../types";
+import { CompositionConstraintError } from "./constraint-engine";
 import { runBacktest } from "../backtest";
 import type { ExecutionConfig } from "../backtest";
 import {
@@ -20,6 +21,43 @@ import { ComposedStrategy } from "./index";
 const USDC: AssetSymbol = "USDC";
 const START = 1_700_000_000_000;
 const amount = (value: string) => FixedPointDecimal.fromString(value);
+
+const PRICES: ReadonlyMap<AssetSymbol, FixedPointDecimal> = new Map([
+  [USDC, amount("1")],
+  ["EURC", amount("1")],
+]);
+
+function staticPortfolio(
+  cash: string,
+  positions: ReadonlyArray<{
+    asset: AssetSymbol;
+    size: string;
+    memberId?: string;
+  }>
+): PortfolioView {
+  const views: PositionView[] = positions.map((position) => ({
+    asset: position.asset,
+    size: amount(position.size),
+    basis: amount("0"),
+    ...(position.memberId === undefined ? {} : { memberId: position.memberId }),
+  }));
+  return {
+    cash: amount(cash),
+    getPosition: (asset) => views.find((view) => view.asset === asset),
+    positions: () => views,
+    totalValue: (prices) => {
+      let total = amount(cash);
+      for (const view of views) {
+        const price = prices.get(view.asset);
+        if (price === undefined) {
+          throw new RangeError(`no price for ${view.asset}`);
+        }
+        total = total.add(view.size.mul(price));
+      }
+      return total;
+    },
+  };
+}
 
 function backtest(strategy: Strategy<unknown>, funding = false) {
   return runBacktest({
@@ -415,5 +453,211 @@ describe("ComposedStrategy", () => {
 
     expect(result.snapshots[0]?.positions[0]?.memberId).toBe("outer/inner");
     expect(result.finalValue.toString()).toBe("1000");
+  });
+
+  it("rejects a member count limit at init", () => {
+    const noop: Strategy<null> = {
+      name: "noop",
+      init: () => undefined,
+      step: () => undefined,
+      rebalance: () => [],
+      close: () => [],
+    };
+    const strategy = new ComposedStrategy(
+      [
+        {
+          id: "first",
+          strategy: noop,
+          allocation: amount("0.5"),
+          config: null,
+        },
+        {
+          id: "second",
+          strategy: noop,
+          allocation: amount("0.5"),
+          config: null,
+        },
+      ],
+      { constraints: { maxMemberCount: 1 } }
+    );
+
+    expect(() =>
+      strategy.init({ startingCapital: amount("1000"), config: undefined })
+    ).toThrow(CompositionConstraintError);
+  });
+
+  it("rejects a rebalance that breaches aggregate exposure", () => {
+    const buy = (): Strategy<null> => ({
+      name: "buy",
+      init: () => undefined,
+      step: () => undefined,
+      rebalance: () => [{ asset: USDC, size: amount("300") }],
+      close: () => [],
+    });
+    const strategy = new ComposedStrategy(
+      [
+        {
+          id: "first",
+          strategy: buy(),
+          allocation: amount("0.5"),
+          config: null,
+        },
+        {
+          id: "second",
+          strategy: buy(),
+          allocation: amount("0.5"),
+          config: null,
+        },
+      ],
+      { constraints: { maxAggregateExposure: amount("0.5") } }
+    );
+    strategy.init({
+      startingCapital: amount("1000"),
+      config: undefined,
+    });
+
+    expect(() =>
+      strategy.rebalance({
+        market: { timestamp: 1, prices: PRICES },
+        portfolio: staticPortfolio("1000", []),
+      })
+    ).toThrow(CompositionConstraintError);
+  });
+
+  it("clamps a rebalance that would breach aggregate exposure", () => {
+    const buy = (): Strategy<null> => ({
+      name: "buy",
+      init: () => undefined,
+      step: () => undefined,
+      rebalance: () => [{ asset: USDC, size: amount("300") }],
+      close: () => [],
+    });
+    const strategy = new ComposedStrategy(
+      [
+        {
+          id: "first",
+          strategy: buy(),
+          allocation: amount("0.5"),
+          config: null,
+        },
+        {
+          id: "second",
+          strategy: buy(),
+          allocation: amount("0.5"),
+          config: null,
+        },
+      ],
+      {
+        constraints: { maxAggregateExposure: amount("0.5") },
+        mode: "clamp",
+      }
+    );
+    strategy.init({
+      startingCapital: amount("1000"),
+      config: undefined,
+    });
+
+    const orders = strategy.rebalance({
+      market: { timestamp: 1, prices: PRICES },
+      portfolio: staticPortfolio("1000", []),
+    });
+
+    const totalSize = orders.reduce(
+      (total, order) => total + order.size.toStroops(),
+      0n
+    );
+    expect(totalSize).toBeLessThanOrEqual(amount("500").toStroops());
+    expect(totalSize).toBeGreaterThan(0n);
+    expect(orders.map((order) => order.memberId)).toEqual(["first", "second"]);
+  });
+
+  it("measures member weight from the member's own positions", () => {
+    const noop: Strategy<null> = {
+      name: "noop",
+      init: () => undefined,
+      step: () => undefined,
+      rebalance: () => [],
+      close: () => [],
+    };
+    const strategy = new ComposedStrategy(
+      [
+        {
+          id: "heavy",
+          strategy: noop,
+          allocation: amount("0.5"),
+          config: null,
+        },
+        {
+          id: "light",
+          strategy: noop,
+          allocation: amount("0.5"),
+          config: null,
+        },
+      ],
+      { constraints: { maxMemberWeight: amount("0.7") } }
+    );
+    strategy.init({
+      startingCapital: amount("1000"),
+      config: undefined,
+    });
+
+    expect(() =>
+      strategy.rebalance({
+        market: { timestamp: 1, prices: PRICES },
+        portfolio: staticPortfolio("0", [
+          { asset: USDC, size: "800", memberId: "heavy" },
+          { asset: USDC, size: "200", memberId: "light" },
+        ]),
+      })
+    ).toThrow(CompositionConstraintError);
+  });
+
+  it("counts nested member positions toward member weight", () => {
+    const noop: Strategy<null> = {
+      name: "noop",
+      init: () => undefined,
+      step: () => undefined,
+      rebalance: () => [],
+      close: () => [],
+    };
+    const inner = new ComposedStrategy([
+      {
+        id: "inner",
+        strategy: noop,
+        allocation: amount("1"),
+        config: null,
+      },
+    ]);
+    const strategy = new ComposedStrategy(
+      [
+        {
+          id: "outer",
+          strategy: inner,
+          allocation: amount("0.5"),
+          config: undefined,
+        },
+        {
+          id: "other",
+          strategy: noop,
+          allocation: amount("0.5"),
+          config: null,
+        },
+      ],
+      { constraints: { maxMemberWeight: amount("0.7") } }
+    );
+    strategy.init({
+      startingCapital: amount("1000"),
+      config: undefined,
+    });
+
+    expect(() =>
+      strategy.rebalance({
+        market: { timestamp: 1, prices: PRICES },
+        portfolio: staticPortfolio("0", [
+          { asset: USDC, size: "800", memberId: "outer/inner" },
+          { asset: USDC, size: "200", memberId: "other" },
+        ]),
+      })
+    ).toThrow(CompositionConstraintError);
   });
 });
