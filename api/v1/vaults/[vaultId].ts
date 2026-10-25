@@ -4,6 +4,7 @@ import { handleGetVaultById } from "@meridian/api-core";
 import {
   applyCors,
   checkRateLimit,
+  requireGetMethod,
   vaultReadCacheControl,
 } from "../../_lib/middleware.js";
 
@@ -16,6 +17,7 @@ const KNOWN_VAULT_IDS = new Set(
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (applyCors(req, res)) return;
+  if (requireGetMethod(req, res)) return;
   try {
     if (!(await checkRateLimit(req, res))) return;
   } catch (err) {

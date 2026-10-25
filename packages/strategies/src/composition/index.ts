@@ -13,6 +13,14 @@ import type {
   StrategyContext,
   StrategyInitParams,
 } from "../strategy";
+import { allocateCapital } from "./capital-allocation";
+import {
+  enforceClamp,
+  enforceReject,
+  validateComposition,
+  type CompositionConstraintConfig,
+  type MemberView,
+} from "./constraint-engine";
 
 /**
  * A member of a composed strategy. `allocation` is the fraction of the
@@ -43,12 +51,24 @@ interface InitializedMember {
  * Returned orders are tagged with the member id so same-asset positions stay
  * distinct in the runner's portfolio. Member ids cannot contain `/`, which
  * separates IDs in nested compositions.
+ *
+ * An optional `constraintConfig` applies composition-wide limits at init and
+ * on every rebalance. The default enforcement mode is `reject`; `clamp`
+ * trims aggregate-exposure orders that would breach an asset limit.
  */
 export class ComposedStrategy implements Strategy<unknown> {
   readonly name = "composed-strategy";
+  readonly memberAllocations: readonly {
+    readonly id: string;
+    readonly allocation: FixedPointDecimal;
+  }[];
   readonly #members: readonly InitializedMember[];
+  readonly #constraintConfig: CompositionConstraintConfig | undefined;
 
-  constructor(members: readonly ComposedStrategyMember<unknown>[]) {
+  constructor(
+    members: readonly ComposedStrategyMember<unknown>[],
+    constraintConfig?: CompositionConstraintConfig
+  ) {
     if (members.length === 0) {
       throw new RangeError("a composed strategy requires at least one member");
     }
@@ -89,12 +109,53 @@ export class ComposedStrategy implements Strategy<unknown> {
       config: member.config,
       portfolio: (portfolio) => new MemberPortfolioView(portfolio, member.id),
     }));
+    this.memberAllocations = this.#members.map(({ id, allocation }) => ({
+      id,
+      allocation,
+    }));
+    this.#constraintConfig = constraintConfig;
   }
 
   init(_params: StrategyInitParams<unknown>): void {
+    if (this.#constraintConfig !== undefined) {
+      const emptyPortfolio: PortfolioView = {
+        cash: _params.startingCapital,
+        getPosition: () => undefined,
+        positions: () => [],
+        totalValue: () => _params.startingCapital,
+      };
+      const memberViews: MemberView[] = this.#members.map((member) => ({
+        id: member.id,
+        portfolio: member.portfolio(emptyPortfolio),
+      }));
+      enforceReject(
+        validateComposition(
+          this.#constraintConfig.constraints,
+          memberViews,
+          emptyPortfolio,
+          new Map<AssetSymbol, FixedPointDecimal>()
+        )
+      );
+    }
+
+    const capital = _params.startingCapital.toStroops();
+    const sign = capital < 0n ? -1n : 1n;
+    const allocation = allocateCapital(
+      FixedPointDecimal.fromStroops(capital * sign),
+      this.#members.map(({ id, allocation: weight }) => ({
+        id,
+        weight,
+      }))
+    );
+    const capitalByMember = new Map(
+      allocation.map(({ id, amount }) => [
+        id,
+        FixedPointDecimal.fromStroops(amount.toStroops() * sign),
+      ])
+    );
     for (const member of this.#members) {
       member.strategy.init({
-        startingCapital: _params.startingCapital.mul(member.allocation),
+        startingCapital: capitalByMember.get(member.id)!,
         config: member.config,
       });
     }
@@ -107,12 +168,40 @@ export class ComposedStrategy implements Strategy<unknown> {
   }
 
   rebalance(context: StrategyContext): readonly Order[] {
-    return this.#members.flatMap((member) =>
+    const orders = this.#members.flatMap((member) =>
       this.#tagOrders(
         this.#memberNamespace(member.id, context.portfolio),
         member.strategy.rebalance(this.#memberContext(member, context))
       )
     );
+
+    const config = this.#constraintConfig;
+    if (config === undefined) return orders;
+
+    const memberViews: MemberView[] = this.#members.map((member) => ({
+      id: member.id,
+      portfolio: member.portfolio(context.portfolio),
+    }));
+    const validation = validateComposition(
+      config.constraints,
+      memberViews,
+      context.portfolio,
+      context.market.prices,
+      orders
+    );
+
+    if ((config.mode ?? "reject") === "clamp") {
+      return enforceClamp(
+        validation,
+        orders,
+        context.market.prices,
+        context.portfolio.totalValue(context.market.prices),
+        context.portfolio
+      ).orders;
+    }
+
+    enforceReject(validation);
+    return orders;
   }
 
   close(context: StrategyContext): readonly Order[] {
@@ -151,6 +240,8 @@ export class ComposedStrategy implements Strategy<unknown> {
       : memberId;
   }
 }
+
+export * from "./backtest-runner";
 
 class MemberPortfolioView implements PortfolioView {
   readonly #portfolio: PortfolioView;

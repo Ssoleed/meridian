@@ -20,6 +20,7 @@ export function WalletConnect() {
     cancelRiskDisclosure,
   } = useWalletConnect();
   const [copied, setCopied] = useState(false);
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [installedById, setInstalledById] = useState<
     Partial<Record<WalletId, boolean>>
@@ -30,6 +31,13 @@ export function WalletConnect() {
   // Which option receives focus when the menu opens: the first for a click or
   // ArrowDown, the last for ArrowUp (WAI-ARIA menu button pattern).
   const openFocusRef = useRef<"first" | "last">("first");
+
+  useEffect(
+    () => () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+    },
+    []
+  );
 
   // Refreshed on every open rather than once on mount: extension install
   // state can change between opens without a page reload.
@@ -71,7 +79,8 @@ export function WalletConnect() {
     try {
       await navigator.clipboard.writeText(publicKey);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       push("error", t("walletConnect.copyFailed"));
     }
@@ -230,7 +239,7 @@ export function WalletConnect() {
         <div
           ref={menuRef}
           role="menu"
-          aria-label={t("common.connectWallet")}
+          aria-label={t("walletConnect.chooseWallet")}
           onKeyDown={handleMenuKeyDown}
           data-testid="wallet-picker-menu"
           className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-gray-800 bg-deep shadow-xl shadow-black/40 overflow-hidden z-10"

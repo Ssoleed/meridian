@@ -103,3 +103,56 @@ describe("computePosition with no recorded cost basis", () => {
     expect(position?.earned).toBe(20);
   });
 });
+
+describe("computePosition reports gross value with the raw ratio", () => {
+  // The vault burns shares * total_adapter_shares / total_shares adapter
+  // shares. Position value is estimated before adapter rounding and fees.
+  it("converts shares to assets with the raw ratio", () => {
+    // 300 shares of 1,000 total own 300 of 1,200 assets.
+    const [position] = computePosition(VAULT, {
+      shares: 300_0000000n,
+      totalShares: 1_000_0000000n,
+      totalAssets: 1_200_0000000n,
+      principal: 300_0000000n,
+      entryTime: 0n,
+    });
+    // 300 * 1200 / 1000 = 360 before fees and adapter rounding.
+    expect(position?.deposited).toBe(360);
+    expect(position?.earned).toBe(60);
+  });
+
+  it("preserves fractional USDC when totalAssets < totalShares", () => {
+    // Truncation applies to stroops, not whole USDC.
+    // 300 * 500 / 1000 = 150 exactly.
+    const [exact] = computePosition(VAULT, {
+      shares: 300_0000000n,
+      totalShares: 1_000_0000000n,
+      totalAssets: 500_0000000n,
+      principal: 300_0000000n,
+      entryTime: 0n,
+    });
+    expect(exact?.deposited).toBe(150);
+    expect(exact?.earned).toBe(0);
+
+    // 333 * 500 / 1000 = 166.5 USDC, with no fractional stroop.
+    const [rounded] = computePosition(VAULT, {
+      shares: 333_0000000n,
+      totalShares: 1_000_0000000n,
+      totalAssets: 500_0000000n,
+      principal: 333_0000000n,
+      entryTime: 0n,
+    });
+    expect(rounded?.deposited).toBe(166.5);
+  });
+
+  it("truncates a fractional stroop in the gross position value", () => {
+    const [position] = computePosition(VAULT, {
+      shares: 3n,
+      totalShares: 7n,
+      totalAssets: 10n,
+      principal: 3n,
+      entryTime: 0n,
+    });
+    expect(position?.deposited).toBe(0.0000004);
+  });
+});

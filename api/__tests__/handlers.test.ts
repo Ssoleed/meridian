@@ -681,6 +681,14 @@ describe("GET /api/v1/vaults", () => {
     });
   });
 
+  it("rejects non-GET methods with 405", async () => {
+    const res = makeRes();
+    await vaultsHandler(fakeReq({ method: "POST" }), res);
+    expect(res.statusCode).toBe(405);
+    expect(res.headers["Allow"]).toBe("GET");
+    expect(fetchAllVaults).not.toHaveBeenCalled();
+  });
+
   it("reports cached: true when served from cache", async () => {
     vi.mocked(fetchVaultsWithCache).mockResolvedValueOnce({
       vaults: [
@@ -748,6 +756,17 @@ describe("GET /api/v1/vaults/:vaultId", () => {
     expect(res.statusCode).toBe(404);
     expect(res.headers["Cache-Control"]).toBeUndefined();
   });
+
+  it("rejects non-GET methods with 405", async () => {
+    const res = makeRes();
+    await vaultDetailHandler(
+      fakeReq({ method: "POST", query: { vaultId: "meridian-usdc" } }),
+      res
+    );
+    expect(res.statusCode).toBe(405);
+    expect(res.headers["Allow"]).toBe("GET");
+    expect(fetchAllVaults).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/v1/positions/:publicKey", () => {
@@ -758,6 +777,17 @@ describe("GET /api/v1/positions/:publicKey", () => {
       res
     );
     expect(res.statusCode).toBe(400);
+    expect(resolvePositions).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-GET methods with 405", async () => {
+    const res = makeRes();
+    await positionsHandler(
+      fakeReq({ method: "POST", query: { publicKey: PUBKEY } }),
+      res
+    );
+    expect(res.statusCode).toBe(405);
+    expect(res.headers["Allow"]).toBe("GET");
     expect(resolvePositions).not.toHaveBeenCalled();
   });
 
@@ -1488,5 +1518,21 @@ describe("GET /api/v1/admin/vault-state", () => {
     );
 
     expect(res.statusCode).toBe(503);
+  });
+
+  it("rejects non-GET methods with 405", async () => {
+    const res = makeRes();
+    await adminHandler(
+      fakeReq({
+        query: { resource: "vault-state" },
+        method: "POST",
+        headers: {},
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(405);
+    expect(res.headers["Allow"]).toBe("GET");
+    expect(fetchCoordinatorState).not.toHaveBeenCalled();
   });
 });

@@ -35,9 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tested
 
 - **Unit-test the deposit money-math.** Exported and covered `toStroops` (decimal
-  USDC → 7-decimal stroops, incl. sub-unit precision and truncation behaviour) and
-  `resolveProtocol` in `stellar-sdk-helpers` — previously untested code on the path
-  that determines on-chain deposit amounts.
+  USDC → 7-decimal stroops, incl. sub-unit precision and truncation behaviour) in
+  `stellar-sdk-helpers`, previously untested code on the path that determines
+  on-chain deposit amounts.
 
 ### Changed
 

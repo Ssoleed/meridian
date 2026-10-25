@@ -3,6 +3,11 @@
     "title": "Meridian"
   },
 
+  "toasts": {
+    "notifications": "Notifications",
+    "dismiss": "Dismiss {{kind}} notification"
+  },
+
   "walletConnect": {
     "disconnect": "Disconnect",
     "copyAddress": "Copy Address",
@@ -74,7 +79,8 @@
     "vaultStateUnavailable": "Couldn't read the current vault price. Please try again.",
     "fundingWallet": "Funding testnet wallet with Blend test USDC...",
     "walletFunded": "Testnet wallet funded",
-    "faucetFailed": "Failed to fund testnet wallet"
+    "faucetFailed": "Failed to fund testnet wallet",
+    "faucetTimeout": "Faucet request timed out"
   },
 
   "common": {
@@ -86,8 +92,13 @@
 
   "admin": {
     "title": "Admin Dashboard",
+    "access": "Admin access",
     "connectPrompt": "Connect an authorized admin wallet to view the dashboard.",
     "notAuthorized": "This wallet is not authorized to view the admin dashboard.",
+    "switchWallet": "Switch Wallet",
+    "connected": "Connected",
+    "readError": "Failed to verify admin status.",
+    "loading": "Loading...",
     "keeperHealth": {
       "title": "Keeper Health",
       "accrual": "Accrual Keeper",

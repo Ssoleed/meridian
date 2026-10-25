@@ -37,7 +37,7 @@ export class StaticPriceFeed implements PriceFeed {
   }
 
   static create(
-    prices: Record<AssetSymbol, string | FixedPointDecimal>
+    prices: Partial<Record<AssetSymbol, string | FixedPointDecimal>>
   ): StaticPriceFeed {
     const map = new Map<AssetSymbol, FixedPointDecimal>();
     for (const [asset, value] of Object.entries(prices)) {
@@ -119,12 +119,14 @@ export class BacktestPriceFeed implements PriceFeed {
   }
 
   static create(
-    data: Record<
-      AssetSymbol,
-      Array<{
-        timestamp: SimulationTimestamp;
-        price: string | FixedPointDecimal;
-      }>
+    data: Partial<
+      Record<
+        AssetSymbol,
+        Array<{
+          timestamp: SimulationTimestamp;
+          price: string | FixedPointDecimal;
+        }>
+      >
     >,
     options?: BacktestPriceFeedOptions
   ): BacktestPriceFeed {

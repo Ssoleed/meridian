@@ -256,8 +256,18 @@ describe("DeltaNeutralStrategy stepping", () => {
     expect(strategy.netDelta.toStroops()).toBe(0n);
     expect(strategy.fundingPnl.toString()).toBe("21.744");
     expect(strategy.rebalanceCount).toBe(1);
-    expect(strategy.deltaHistory[2]!.rebalanced).toBe(true);
-    expect(strategy.deltaHistory[3]!.rebalanced).toBe(false);
+
+    const rebalanceObservation = strategy.deltaHistory[2]!;
+    expect(rebalanceObservation.tick).toBe(2);
+    expect(rebalanceObservation.netDelta.toString()).toBe("392.1568628");
+    expect(rebalanceObservation.netDeltaNotional.toString()).toBe("400");
+    expect(rebalanceObservation.rebalanced).toBe(true);
+
+    const followUpObservation = strategy.deltaHistory[3]!;
+    expect(followUpObservation.tick).toBe(3);
+    expect(followUpObservation.netDelta.toStroops()).toBe(0n);
+    expect(followUpObservation.netDeltaNotional.toStroops()).toBe(0n);
+    expect(followUpObservation.rebalanced).toBe(false);
   });
 
   it("trims the hedge when a falling price makes the book net short", () => {

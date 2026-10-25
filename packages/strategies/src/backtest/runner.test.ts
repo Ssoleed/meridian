@@ -27,7 +27,8 @@ const hourly = (steps: number) =>
 /**
  * One USDC price per tick, taken from `prices` in tick order, so a test states
  * the path it is testing rather than interpolating between endpoints. EURC is
- * carried at a flat price of 1 because the feed wants every asset.
+ * carried at a flat price of 1 in these cases, though feeds may contain any
+ * subset of the engine's supported assets.
  */
 const feed = (...prices: string[]) =>
   BacktestPriceFeed.create({
@@ -83,6 +84,69 @@ const hold = () => ({
 });
 
 describe("runBacktest", () => {
+  it("runs a strategy with a volatile asset in its portfolio", () => {
+    const xlmFeed = BacktestPriceFeed.create({
+      XLM: [
+        { timestamp: START, price: "0.10" },
+        { timestamp: START + ONE_HOUR_MS, price: "0.12" },
+      ],
+    });
+    const result = runBacktest({
+      clock: hourly(1),
+      assets: ["XLM"],
+      prices: xlmFeed,
+      strategy: new BuyAndHoldStrategy(),
+      strategyConfig: { asset: "XLM" },
+      initialCash: amount("1000"),
+    });
+
+    expect(result.snapshots[1]?.positions[0]?.asset).toBe("XLM");
+  });
+
+  it("observes member-tagged fills after they are applied", () => {
+    const fills: Array<{
+      asset: AssetSymbol;
+      memberId?: string;
+      size: FixedPointDecimal;
+      price: FixedPointDecimal;
+      fee: FixedPointDecimal;
+    }> = [];
+    const strategy: Strategy<null> = {
+      name: "member-fill",
+      init: () => undefined,
+      step: () => undefined,
+      rebalance: () => [{ asset: USDC, memberId: "alpha", size: amount("1") }],
+      close: () => [],
+    };
+
+    runBacktest({
+      clock: hourly(1),
+      assets: [USDC],
+      prices: feed("100", "100"),
+      strategy,
+      strategyConfig: null,
+      initialCash: amount("1000"),
+      observer: { onFill: (fill) => fills.push(fill) },
+    });
+
+    expect(fills).toEqual([
+      {
+        asset: USDC,
+        memberId: "alpha",
+        size: amount("1"),
+        price: amount("100"),
+        fee: amount("0"),
+      },
+      {
+        asset: USDC,
+        memberId: "alpha",
+        size: amount("1"),
+        price: amount("100"),
+        fee: amount("0"),
+      },
+    ]);
+  });
+
   it("reproduces a hand-worked buy-and-hold run", () => {
     // The reference strategy leaves 50 bps unspent so its entry fill can
     // absorb costs, so 1000 cash buys 995 / 100 = 9.95 units at tick 0.

@@ -5,6 +5,7 @@ import {
   checkRateLimit,
   isCronAuthorized,
   isCronSecretConfigured,
+  requireGetMethod,
   resetRateLimitForTesting,
 } from "../_lib/middleware.js";
 
@@ -95,6 +96,25 @@ describe("applyCors", () => {
     );
     expect(res.headers["Strict-Transport-Security"]).toContain("max-age=");
     expect(res.headers["Content-Security-Policy"]).toBe("default-src 'none'");
+  });
+});
+
+// requireGetMethod ----------------------------------------------------------------
+
+describe("requireGetMethod", () => {
+  it("allows GET requests without writing a response", () => {
+    const res = fakeRes();
+    expect(requireGetMethod(fakeReq("GET"), res)).toBe(false);
+    expect(res.statusCode).toBe(200);
+    expect(res.ended).toBe(false);
+  });
+
+  it("returns 405 with an Allow header for non-GET requests", () => {
+    const res = fakeRes();
+    expect(requireGetMethod(fakeReq("POST"), res)).toBe(true);
+    expect(res.statusCode).toBe(405);
+    expect(res.headers["Allow"]).toBe("GET");
+    expect(res.body).toEqual({ error: "Method not allowed" });
   });
 });
 

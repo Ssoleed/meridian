@@ -494,8 +494,8 @@ export class DeltaNeutralStrategy implements Strategy<DeltaNeutralConfig> {
       );
       this.#rebalanceCount += 1;
       this.#refreshDelta(price);
+      this.#markLastObservationRebalanced();
     }
-    this.#markLastObservationRebalanced();
     return [];
   }
 

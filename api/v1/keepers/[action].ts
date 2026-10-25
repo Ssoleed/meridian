@@ -25,19 +25,21 @@ import {
   isCronSecretConfigured,
 } from "../../_lib/middleware.js";
 
-// Consolidated from four separate files (accrue/health/rebalance/alert) to
-// stay under Vercel's per-deployment Serverless Functions cap. URL paths are
-// unchanged: /api/v1/keepers/accrue, /api/v1/keepers/health,
-// /api/v1/keepers/rebalance, and /api/v1/keepers/alert all route here via
-// the [action].ts dynamic segment, with req.query.action set accordingly.
+// Consolidated from the former per-keeper files to stay under Vercel's
+// per-deployment Serverless Functions cap. URL paths are unchanged:
+// /api/v1/keepers/accrue, /api/v1/keepers/health,
+// /api/v1/keepers/rebalance, /api/v1/keepers/alert, and
+// /api/v1/keepers/snapshot all route here via the [action].ts dynamic
+// segment, with req.query.action set accordingly.
 //
-// health is read-only and public, same as before; accrue/rebalance/alert
-// still require the cron bearer token and are never CORS-gated. accrue and
-// rebalance sign and submit real transactions off a funded/admin account;
-// alert signs nothing but still costs an RPC round trip per known vault plus
-// a webhook POST per unauthenticated probe, so it gets the same rate-limit
-// backstop. That auth split is preserved exactly as it was when these were
-// separate files.
+// health is read-only and public, same as before; accrue/rebalance/alert/
+// snapshot still require the cron bearer token and are never CORS-gated.
+// accrue and rebalance sign and submit real transactions off a funded/admin
+// account; alert signs nothing but still costs an RPC round trip per known
+// vault plus a webhook POST per unauthenticated probe; snapshot reads every
+// tracked wallet and writes the resulting series. They all keep the same
+// rate-limit backstop. That auth split is preserved exactly as it was when
+// these were separate files.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { action } = req.query;
 
@@ -71,14 +73,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // No applyCors: cron-invoked, never browser-facing. But all three sign or
-  // submit real transactions, or read/post on their behalf, unlike simple
-  // reads, so they still get a rate-limit backstop. Checked before auth,
-  // deliberately, even though that costs a Redis round trip on an
+  // No applyCors: cron-invoked, never browser-facing. But these actions sign
+  // or submit real transactions, or read and write on their behalf, unlike
+  // simple reads, so they still get a rate-limit backstop. Checked before
+  // auth, deliberately, even though that costs a Redis round trip on an
   // unauthenticated probe: this is the volume-abuse backstop for *all*
-  // traffic, not just correctly authenticated traffic — if it only ran
-  // after a successful auth check, unauthenticated/wrong-token spam would
-  // be entirely unbounded.
+  // traffic, not just correctly authenticated traffic. If it only ran after
+  // a successful auth check, unauthenticated or wrong-token spam would be
+  // entirely unbounded.
   try {
     if (!(await checkRateLimit(req, res, { strict: true }))) return;
   } catch (err) {

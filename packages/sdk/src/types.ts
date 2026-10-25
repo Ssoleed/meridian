@@ -41,7 +41,7 @@ export interface Position {
 export interface Transaction {
   /** Base64-encoded unsigned Soroban transaction XDR. */
   xdr: string;
-  /** Minimum Soroban resource fee in stroops, returned by simulation. */
+  /** Total assembled transaction fee in stroops, including the inclusion fee. */
   fee: string;
 }
 

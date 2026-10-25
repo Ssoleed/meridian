@@ -74,10 +74,11 @@ export const VIRTUAL_OFFSET = 1_000n;
  * Defaults to rounding *down*, matching the contract's deposit direction: a
  * depositor is never credited more shares than their assets bought.
  *
- * Pass `"up"` when the share amount is being burned to release a requested
- * amount of assets. Rounding down there would release slightly less than the
- * requested USDC, so withdrawal sizing rounds up to the smallest share count
- * whose payout covers the request.
+ * The virtual offset mirrors the contract's *deposit* pricing only. The
+ * contract's `withdraw` burns adapter shares with the raw ratio
+ * (`shares * total_adapter_shares / total_shares`, no offset), so this
+ * function is not the inverse of `convertSharesToAssets` and does not
+ * reproduce the on-chain withdrawal payout.
  *
  *   virtualSupply = totalSupply + VIRTUAL_OFFSET
  *   virtualAssets = totalAssets + VIRTUAL_OFFSET
@@ -99,20 +100,20 @@ export function convertAssetsToShares(
 }
 
 /**
- * Convert a share amount to assets using ERC-4626 virtual-offset math.
- * Rounds *down* (floor division), matching the contract's withdrawal payout
- * and ERC-4626's `previewRedeem`.
+ * Convert shares to gross position value using the raw assets-to-supply ratio.
+ * Rounds down in stroops, consistently with `computePosition` in
+ * `@meridian/stellar-sdk-helpers`. This is an estimate before performance fees;
+ * the adapter's separate share-redemption rounding can also reduce the payout.
  *
- *   assets = shares * virtualAssets / virtualSupply
+ *   assets = shares * totalAssets / totalSupply
  */
 export function convertSharesToAssets(
   shares: bigint,
   totalAssets: bigint,
   totalSupply: bigint
 ): bigint {
-  const virtualAssets = totalAssets + VIRTUAL_OFFSET;
-  const virtualSupply = totalSupply + VIRTUAL_OFFSET;
-  return (shares * virtualAssets) / virtualSupply;
+  if (totalSupply === 0n) return 0n;
+  return (shares * totalAssets) / totalSupply;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,24 +204,37 @@ export abstract class VaultBase {
   /**
    * Deposit `assets` USDC into the vault for the `receiver` account.
    *
-   * Builds a `deposit(receiver, assets, 0)` contract call. The contract pulls
-   * USDC from `receiver` and mints the shares to `receiver` in the same call,
-   * so that address is the depositor and must be the one authorising the
-   * transaction. The third argument is `min_shares_out`; passing 0 disables
-   * slippage protection. Callers that need a minimum-shares guarantee should
-   * call `convertToShares` first and construct the operation directly.
+   * Builds a `deposit(receiver, assets, min_shares_out)` contract call. The
+   * contract pulls USDC from `receiver` and mints the shares to `receiver` in
+   * the same call, so that address is the depositor and must be the one
+   * authorising the transaction.
+   *
+   * `minSharesOut` is the contract's `min_shares_out` slippage guard: the
+   * transaction reverts with `SlippageExceeded` if the minted shares would be
+   * less than this amount. It defaults to 0n, which disables the guard; pass
+   * the smallest share amount you are willing to accept (e.g. from
+   * `convertToShares`, discounted by your tolerated slippage) to protect
+   * against share-price movement between the transaction's signing and its
+   * inclusion.
    *
    * @param assets   Amount in stroops (1 USDC = 10 000 000)
    * @param receiver Stellar G-address credited with mUSDC shares
+   * @param minSharesOut Minimum acceptable mUSDC shares in stroops
+   *                     (default 0n, which disables slippage protection)
    */
-  async deposit(assets: bigint, receiver: string): Promise<Transaction> {
+  async deposit(
+    assets: bigint,
+    receiver: string,
+    minSharesOut: bigint = 0n
+  ): Promise<Transaction> {
     if (assets <= 0n) throw new Error("assets must be positive");
+    if (minSharesOut < 0n) throw new Error("minSharesOut must be non-negative");
     return this.prepare(
       this.contract().call(
         "deposit",
         addrScVal(receiver),
         i128(assets),
-        i128(0n)
+        i128(minSharesOut)
       )
     );
   }
@@ -233,8 +247,9 @@ export abstract class VaultBase {
    * `owner` and pays USDC to that same account, so `receiver` must equal
    * `owner` and a mismatch is rejected rather than silently ignored.
    *
-   * The share amount is rounded up, so the payout covers `assets` rather than
-   * falling a stroop short of it.
+   * Shares are rounded up against the raw gross-value ratio, without the
+   * deposit pricing offset. Adapter rounding and performance fees can still
+   * reduce the net payout; use `minUsdcOut` to enforce a payout minimum.
    *
    * `minUsdcOut` is the contract's `min_usdc_out` slippage guard: the
    * transaction reverts if the payout would be less than this amount. It
@@ -265,12 +280,10 @@ export abstract class VaultBase {
       this.totalAssets(),
       this.totalSupply(),
     ]);
-    const shares = convertAssetsToShares(
-      assets,
-      totalAssets,
-      totalSupply,
-      "up"
-    );
+    if (totalAssets <= 0n || totalSupply <= 0n) {
+      throw new Error("vault has no redeemable assets or shares");
+    }
+    const shares = (assets * totalSupply + totalAssets - 1n) / totalAssets;
     return this.prepare(
       this.contract().call(
         "withdraw",
@@ -480,8 +493,8 @@ export abstract class VaultBase {
   }
 
   /**
-   * Convert a share amount to the equivalent assets at the current exchange
-   * rate, including ERC-4626 virtual-offset inflation protection.
+   * Convert a share amount to its estimated gross asset value at the current
+   * rate, before adapter rounding and performance fees.
    * ERC-4626 `convertToAssets(uint256 shares)`.
    *
    * @param shares Share amount in stroops to convert
@@ -515,9 +528,9 @@ export abstract class VaultBase {
   }
 
   /**
-   * Maximum USDC that `owner` may withdraw in a single transaction: the full
-   * redemption value of their position. A pause does not restrict this, since
-   * the contract leaves withdrawals open while paused.
+   * Maximum estimated gross USDC value of `owner`'s full position. Adapter
+   * rounding and performance fees can reduce the amount actually received. A
+   * pause does not restrict withdrawals, since the contract leaves them open.
    * ERC-4626 `maxWithdraw(address)`.
    *
    * @param owner Stellar G-address to check

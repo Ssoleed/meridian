@@ -3,11 +3,13 @@ import { handleGetVaults } from "@meridian/api-core";
 import {
   applyCors,
   checkRateLimit,
+  requireGetMethod,
   vaultReadCacheControl,
 } from "../../_lib/middleware.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (applyCors(req, res)) return;
+  if (requireGetMethod(req, res)) return;
   try {
     if (!(await checkRateLimit(req, res))) return;
   } catch (err) {

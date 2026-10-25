@@ -31,6 +31,10 @@ export interface RawPosition {
  *   currentValue = shares * totalAssets / totalShares   (value of the holding)
  *   earned       = max(0, currentValue − principal)     (yield accrued)
  *
+ * The SDK uses the same raw ratio for gross position value. The vault burns
+ * `shares * total_adapter_shares / total_shares` adapter shares on withdrawal;
+ * adapter rounding and performance fees can reduce the actual payout.
+ *
  * Returns an empty array when the address holds no shares.
  */
 export function computePosition(

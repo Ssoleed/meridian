@@ -4,11 +4,16 @@ import { adminRoute } from "../routes/admin.js";
 import { keepersRoute } from "../routes/keepers.js";
 
 vi.mock("@meridian/api-core", () => ({
+  handleGetAdminHistory: vi.fn(),
   handleGetVaultState: vi.fn(),
   handleGetKeeperHealth: vi.fn(),
 }));
 
-import { handleGetVaultState, handleGetKeeperHealth } from "@meridian/api-core";
+import {
+  handleGetAdminHistory,
+  handleGetVaultState,
+  handleGetKeeperHealth,
+} from "@meridian/api-core";
 
 function buildApp() {
   const app = Fastify({ logger: false });
@@ -98,20 +103,79 @@ describe("GET /api/v1/admin/vault-state", () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
-  it("returns 404 for unregistered admin paths and non-GET methods", async () => {
+  it("returns 404 for unregistered admin paths", async () => {
     const app = buildApp();
     const unknown = await app.inject({
       method: "GET",
       url: "/api/v1/admin/nope",
     });
     expect(unknown.statusCode).toBe(404);
+  });
 
-    const post = await app.inject({
-      method: "POST",
-      url: "/api/v1/admin/vault-state",
-    });
-    expect(post.statusCode).toBe(404);
+  it("rejects non-GET admin methods with 405", async () => {
+    const app = buildApp();
+    for (const url of [
+      "/api/v1/admin/vault-state",
+      "/api/v1/admin/history?vaultId=meridian-usdc",
+    ]) {
+      const post = await app.inject({ method: "POST", url });
+      expect(post.statusCode).toBe(405);
+      expect(post.headers.allow).toBe("GET");
+    }
     expect(handleGetVaultState).not.toHaveBeenCalled();
+    expect(handleGetAdminHistory).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/v1/admin/history", () => {
+  it("returns admin actions for the requested vault", async () => {
+    const app = buildApp();
+    const actions = [{ action: "pause", ledger: 42 }];
+    vi.mocked(handleGetAdminHistory).mockResolvedValue({
+      status: 200,
+      body: { vaultId: "meridian-usdc", actions },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/history?vaultId=meridian-usdc",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ vaultId: "meridian-usdc", actions });
+    expect(handleGetAdminHistory).toHaveBeenCalledWith("meridian-usdc");
+  });
+
+  it("returns 400 without calling the handler when vaultId is missing", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/history",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "vaultId is required" });
+    expect(handleGetAdminHistory).not.toHaveBeenCalled();
+  });
+
+  it("returns the handler status and logs an error", async () => {
+    const app = buildApp();
+    const logError = vi.spyOn(app.log, "error");
+    const err = new Error("horizon unavailable");
+    vi.mocked(handleGetAdminHistory).mockResolvedValue({
+      status: 500,
+      body: { error: "Failed to fetch admin history" },
+      error: err,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/history?vaultId=meridian-usdc",
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Failed to fetch admin history" });
+    expect(logError).toHaveBeenCalledWith(
+      err,
+      "[admin] failed to read admin history"
+    );
   });
 });
 

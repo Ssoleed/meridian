@@ -156,13 +156,6 @@ export function toStroops(value: string): bigint {
   return BigInt(whole) * 10_000_000n + BigInt(fracPadded);
 }
 
-/** Resolve the protocol name ("Blend" or "DeFindex") from a vault ID prefix. Throws for unrecognised prefixes. */
-export function resolveProtocol(vaultId: string): "Blend" | "DeFindex" {
-  if (vaultId.startsWith("blend-")) return "Blend";
-  if (vaultId.startsWith("defindex-")) return "DeFindex";
-  throw new Error(`No protocol mapping for vault: ${vaultId}`);
-}
-
 /**
  * Execute a read-only Soroban contract call via simulation and return the
  * decoded native value. Returns `null` when the simulation succeeds but
@@ -197,7 +190,8 @@ export async function simulateView(
 /**
  * Fetch the caller's account, simulate the operation to obtain the resource
  * footprint and fee, assemble the transaction, and return the unsigned XDR
- * and minimum resource fee. Throws if simulation fails.
+ * and total transaction fee, including the inclusion fee. Throws if
+ * simulation fails.
  */
 export async function prepareSorobanTx(
   network: StellarNetwork,
@@ -234,7 +228,7 @@ export async function prepareSorobanTx(
   const prepared = rpc.assembleTransaction(tx, sim).build();
   return {
     xdr: prepared.toEnvelope().toXDR("base64"),
-    fee: sim.minResourceFee,
+    fee: prepared.fee,
   };
 }
 

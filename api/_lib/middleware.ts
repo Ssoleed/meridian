@@ -76,6 +76,21 @@ export function applyCors(req: VercelRequest, res: VercelResponse): boolean {
   return false;
 }
 
+/**
+ * Reject any method other than GET on a read-only route. Returns true when a
+ * 405 has already been sent, so callers use `if (requireGetMethod(req, res))
+ * return;`.
+ */
+export function requireGetMethod(
+  req: VercelRequest,
+  res: VercelResponse
+): boolean {
+  if (req.method === "GET") return false;
+  res.setHeader("Allow", "GET");
+  res.status(405).json({ error: "Method not allowed" });
+  return true;
+}
+
 // Cache policy shared by both vault-read endpoints: the list in
 // v1/vaults/index.ts and the single-vault read in v1/vaults/[vaultId].ts.
 // Both must use the same policy — #1051 happened because the detail endpoint

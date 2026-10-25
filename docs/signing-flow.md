@@ -84,7 +84,8 @@ Response `200`:
 
 - `xdr` — base64 transaction envelope, **unsigned**, already prepared via
   `assembleTransaction` (Soroban footprint + resource fee included).
-- `fee` — the simulated `minResourceFee` in stroops, for display.
+- `fee` is the assembled transaction's total fee in stroops, including the
+  inclusion fee, for display.
 
 ### `POST /api/v1/tx/withdraw`
 

@@ -1,4 +1,5 @@
 import { Decimal } from "./decimal";
+import { HealthFactorMonitor } from "./monitor";
 import { LiquidationParameterModel } from "./models/liquidation-parameter";
 
 export interface BacktestRunnerConfig {
@@ -58,6 +59,7 @@ export class SelfRepayingLoanRunner {
   readonly config: BacktestRunnerConfig;
   readonly deleverageThresholdHf: Decimal;
   readonly deleverageTargetHf: Decimal;
+  readonly healthFactorMonitor: HealthFactorMonitor;
 
   constructor(config: BacktestRunnerConfig) {
     this.config = config;
@@ -76,6 +78,12 @@ export class SelfRepayingLoanRunner {
         `Deleverage target health factor (${this.deleverageTargetHf.toString()}) must be greater than the threshold (${this.deleverageThresholdHf.toString()})`
       );
     }
+
+    this.healthFactorMonitor = new HealthFactorMonitor({
+      liquidationModel: config.liquidationModel,
+      safetyBuffer: this.deleverageThresholdHf.sub(Decimal.one()),
+      targetHealthFactor: this.deleverageTargetHf,
+    });
   }
 
   runScenario(scenarioName: string, ticks: MarketTick[]): BacktestReport {
@@ -141,41 +149,28 @@ export class SelfRepayingLoanRunner {
         currentHf.lt(this.deleverageThresholdHf) &&
         !debt.isZero()
       ) {
-        // Auto-deleverage: calculate required debt repayment to bring HF back to deleverageTargetHf
-        // Target HF = (Collateral' * LiquidationThreshold) / Debt'
-        // Where Collateral' = Collateral - (RepayAmount / Price)
-        // Debt' = Debt - RepayAmount
-        // Solving for RepayAmount:
-        // TargetHf * (Debt - Repay) = (CollateralValue - Repay) * Threshold
-        // TargetHf * Debt - TargetHf * Repay = CollateralValue * Threshold - Repay * Threshold
-        // Repay * (TargetHf - Threshold) = TargetHf * Debt - CollateralValue * Threshold
-        const threshold = this.config.liquidationModel.liquidationThreshold;
-        const targetHf = this.deleverageTargetHf;
+        const decision = this.healthFactorMonitor.evaluate({
+          collateralAmount,
+          collateralPrice: tick.collateralPrice,
+          debt,
+        });
 
-        const num = targetHf
-          .mul(debt)
-          .sub(collateralAmount.mul(tick.collateralPrice).mul(threshold));
-        const den = targetHf.sub(threshold);
+        if (decision.shouldDeleverage) {
+          const debtToRepay = decision.requiredDebtRepayment;
+          const collToSell = decision.requiredCollateralToSell;
 
-        // The sale funds the repayment, so it is bounded by the debt and by the
-        // value the collateral can raise.
-        let debtToRepay = num.div(den);
-        if (debtToRepay.gt(debt)) debtToRepay = debt;
-        const collateralValue = collateralAmount.mul(tick.collateralPrice);
-        if (debtToRepay.gt(collateralValue)) debtToRepay = collateralValue;
+          collateralAmount = collateralAmount.sub(collToSell);
+          debt = debt.sub(debtToRepay);
+          deleveragedCollateral = collToSell;
+          totalDeleveragedCollateral =
+            totalDeleveragedCollateral.add(collToSell);
 
-        let collToSell = debtToRepay.div(tick.collateralPrice);
-        if (collToSell.gt(collateralAmount)) collToSell = collateralAmount;
-        collateralAmount = collateralAmount.sub(collToSell);
-        debt = debt.sub(debtToRepay);
-        deleveragedCollateral = collToSell;
-        totalDeleveragedCollateral = totalDeleveragedCollateral.add(collToSell);
-
-        // Recompute HF after deleveraging
-        currentHf = this.config.liquidationModel.computeHealthFactor(
-          collateralAmount.mul(tick.collateralPrice),
-          debt
-        );
+          currentHf = this.healthFactorMonitor.computeHealthFactor({
+            collateralAmount,
+            collateralPrice: tick.collateralPrice,
+            debt,
+          });
+        }
       }
 
       // 5. Engine liquidation check

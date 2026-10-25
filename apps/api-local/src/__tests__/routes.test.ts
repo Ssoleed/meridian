@@ -26,6 +26,33 @@ vi.mock("@meridian/stellar-sdk-helpers", async (importOriginal) => {
     })),
     selectBestVault: vi.fn(),
     isVaultCacheWarm: vi.fn(() => false),
+    KNOWN_POOLS: {
+      mainnet: {
+        "blend-usdc-fixed": {
+          id: "blend-usdc-fixed",
+          name: "Blend Capital",
+          protocol: "blend",
+          label: "Fixed Pool",
+          asset: "USDC",
+        },
+        "meridian-usdc": {
+          id: "meridian-usdc",
+          name: "Meridian",
+          protocol: "meridian",
+          label: "USDC Vault",
+          asset: "USDC",
+        },
+      },
+      testnet: {
+        "meridian-usdc": {
+          id: "meridian-usdc",
+          name: "Meridian",
+          protocol: "meridian",
+          label: "USDC Vault",
+          asset: "USDC",
+        },
+      },
+    },
     // api-core now calls this on the deposit/withdraw build path. Without a
     // stub it resolved to `undefined` and threw, turning five route cases into
     // 500s instead of their expected statuses.
@@ -450,18 +477,30 @@ describe("GET /api/v1/vaults", () => {
     const res = await app.inject({ method: "GET", url: "/api/v1/vaults" });
     expect(res.statusCode).toBe(500);
   });
+
+  it("rejects non-GET methods with 405", async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: "POST", url: "/api/v1/vaults" });
+    expect(res.statusCode).toBe(405);
+    expect(res.headers.allow).toBe("GET");
+    expect(fetchAllVaults).not.toHaveBeenCalled();
+  });
 });
 
-describe("rate limiting on /api/v1/tx/deposit", () => {
-  it("returns 429 after 10 requests within a minute", async () => {
+describe("rate limiting on /api/v1/tx", () => {
+  it("shares one 100 request budget across tx routes", async () => {
     const app = Fastify({ logger: false });
-    await app.register(rateLimit, { max: 1000, timeWindow: "1 minute" });
+    await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
     app.register(txRoute, { prefix: "/api/v1/tx" });
     await app.ready();
 
     vi.mocked(buildDepositTx).mockResolvedValue({ xdr: "TXXDR", fee: "100" });
+    vi.mocked(buildWithdrawTx).mockResolvedValue({
+      xdr: "WITHDRAWXDR",
+      fee: "100",
+    });
 
-    const opts = {
+    const deposit = {
       method: "POST" as const,
       url: "/api/v1/tx/deposit",
       headers: { "content-type": "application/json" },
@@ -472,14 +511,23 @@ describe("rate limiting on /api/v1/tx/deposit", () => {
         riskAcknowledged: true,
       }),
     };
+    const withdraw = {
+      method: "POST" as const,
+      url: "/api/v1/tx/withdraw",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        walletAddress: WALLET,
+        vaultId: "blend-usdc-fixed",
+        shares: "5",
+      }),
+    };
 
-    for (let i = 0; i < 10; i++) {
-      const res = await app.inject(opts);
-      expect(res.statusCode).toBe(200);
+    for (let i = 0; i < 50; i++) {
+      expect((await app.inject(deposit)).statusCode).toBe(200);
+      expect((await app.inject(withdraw)).statusCode).toBe(200);
     }
 
-    const over = await app.inject(opts);
-    expect(over.statusCode).toBe(429);
+    expect((await app.inject(deposit)).statusCode).toBe(429);
   });
 });
 
@@ -497,7 +545,7 @@ describe("GET /api/v1/vaults/:vaultId", () => {
     expect(res.json()).toMatchObject({ id: "blend-usdc-fixed" });
   });
 
-  it("returns 404 for an unknown vault ID", async () => {
+  it("returns 404 for an unknown vault ID without fetching", async () => {
     const app = buildApp();
     vi.mocked(fetchAllVaults).mockResolvedValue([] as never);
 
@@ -507,6 +555,7 @@ describe("GET /api/v1/vaults/:vaultId", () => {
     });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toHaveProperty("error");
+    expect(fetchAllVaults).not.toHaveBeenCalled();
   });
 
   it("returns 500 when the SDK throws", async () => {
@@ -519,5 +568,16 @@ describe("GET /api/v1/vaults/:vaultId", () => {
     });
     expect(res.statusCode).toBe(500);
     expect(res.json()).toHaveProperty("error");
+  });
+
+  it("rejects non-GET methods with 405", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/vaults/blend-usdc-fixed",
+    });
+    expect(res.statusCode).toBe(405);
+    expect(res.headers.allow).toBe("GET");
+    expect(fetchAllVaults).not.toHaveBeenCalled();
   });
 });

@@ -121,7 +121,7 @@ Builds an unsigned Soroban deposit transaction.
 }
 ```
 
-The `xdr` field is a base64-encoded unsigned `TransactionEnvelope`. The `fee` is the simulated resource fee in stroops. The client must forward the XDR to the wallet for signing before submitting.
+The `xdr` field is a base64-encoded unsigned `TransactionEnvelope`. The `fee` is the assembled transaction's total fee in stroops, including the inclusion fee. The client must forward the XDR to the wallet for signing before submitting.
 
 ### `POST /api/v1/tx/withdraw`
 

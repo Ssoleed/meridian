@@ -42,7 +42,8 @@ pub enum ContractError {
     /// `ADPT_SH` (adapter-side shares), not `TOTAL_SH` (vault mUSDC shares),
     /// and the two can desync.
     NoAdapterPosition = 13,
-    /// `migrate_adapter` was called with `max_slippage_bps > 10_000`.
+    /// `migrate_adapter` was called with `max_slippage_bps > 500` (the
+    /// `MAX_ADMIN_SLIPPAGE_BPS` cap).
     InvalidSlippageBps = 14,
     /// `withdraw` was called with a `min_usdc_out` floor and the actual
     /// amount out fell below it. Distinct from `WithdrawalTooSmall` (which

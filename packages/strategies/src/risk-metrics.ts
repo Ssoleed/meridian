@@ -16,16 +16,16 @@ import { Decimal } from "./decimal";
  * - `sharpeRatio` returns the per-period ratio. `annualizeSharpe` scales it by
  *   `sqrt(periodsPerYear)`, the convention for i.i.d. periods. Use 365 for a
  *   daily stablecoin-vault series, 52 weekly, 12 monthly.
- * - `maxDrawdown` is a signed decline, so it is 0 or lower. `valueAtRisk` is a
- *   loss magnitude, so a positive result is a loss. The two signs differ by
- *   intent and each is documented on its own function.
+ * - `maxDrawdown` is a non-negative magnitude, so it is 0 or higher.
+ *   `valueAtRisk` is also a loss magnitude, so a positive result is a loss.
+ *   Both are quoted as positive losses, matching the report field convention.
  */
 
 /** Scale used for ratio arithmetic. Stroops are too coarse for a variance. */
 const METRICS_SCALE = 18;
 
 export interface RiskMetrics {
-  /** Most negative entry of the drawdown series, 0 or lower. */
+  /** Most negative entry of the drawdown series as a magnitude, 0 or higher. */
   readonly maxDrawdown: Decimal;
   /** Per-period Sharpe ratio. Annualize with `annualizeSharpe`. */
   readonly sharpeRatio: Decimal;
@@ -134,8 +134,9 @@ export function valueAtRisk(
 
 /**
  * Most negative entry of the drawdown series, where each entry is the running
- * `value / peak - 1` decline. An empty series, and a series that never leaves
- * its running peak, both give `0`.
+ * `value / peak - 1` decline. The result is reported as a non-negative
+ * magnitude: the sign of the worst decline is flipped, so a series that never
+ * leaves its running peak gives `0`. An empty series also gives `0`.
  */
 export function maxDrawdown(drawdown: readonly Decimal[]): Decimal {
   const scale = workingScale(drawdown);
@@ -145,7 +146,7 @@ export function maxDrawdown(drawdown: readonly Decimal[]): Decimal {
       worst = value.rescale(scale);
     }
   }
-  return worst;
+  return worst.neg();
 }
 
 /** Computes all three metrics from the collector's series in one call. */

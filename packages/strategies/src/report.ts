@@ -38,7 +38,7 @@ export interface EventCounts {
 // Holdings are per asset expressed as FixedPointDecimal amounts.
 export interface ReportPortfolioState {
   readonly timestamp: SimulationTimestamp;
-  readonly holdings: Readonly<Record<AssetSymbol, FixedPointDecimal>>;
+  readonly holdings: Readonly<Partial<Record<AssetSymbol, FixedPointDecimal>>>;
   // Total portfolio value denominated in the reference asset (USDC).
   readonly totalValue: FixedPointDecimal;
 }
@@ -247,7 +247,7 @@ export function deserializeReport(raw: SerializedRunReport): RunReport {
     eventCounts: { ...raw.eventCounts },
     finalState: {
       timestamp: raw.finalState.timestamp,
-      holdings: holdings as Record<AssetSymbol, FixedPointDecimal>,
+      holdings: holdings as Partial<Record<AssetSymbol, FixedPointDecimal>>,
       totalValue: deserializeFixed(raw.finalState.totalValue),
     },
     generators: {
@@ -508,6 +508,8 @@ export function mergeReports(
   // continuation's volatility / sharpeProxy, since the continuation reflects
   // the most recent regime. Callers that need a mathematically combined
   // metric should recompute from raw timeseries; this merge is best-effort.
+  // `maxDrawdown` is a non-negative ratio (0 = no drawdown, 1 = total loss),
+  // so the larger value is the more severe drawdown.
   const maxDrawdown =
     base.riskMetrics.maxDrawdown.compareTo(
       continuation.riskMetrics.maxDrawdown
