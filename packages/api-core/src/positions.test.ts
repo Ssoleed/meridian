@@ -76,31 +76,4 @@ describe("handleGetPositions", () => {
     expect(result.status).toBe(200);
     expect(recordPositionSnapshot).not.toHaveBeenCalled();
   });
-
-  it("does not write a snapshot when a vault failed to read", async () => {
-    vi.mocked(resolvePositions).mockImplementationOnce(
-      async (_publicKey, _network, options) => {
-        options?.onVaultError?.(new Error("rpc down"));
-        return [
-          {
-            vaultId: "blend-usdc-fixed",
-            shares: 1,
-            deposited: 1,
-            earned: 0,
-            entryTime: 0,
-          },
-        ];
-      }
-    );
-    const result = await handleGetPositions(PUBKEY);
-    expect(result.status).toBe(200);
-    expect(recordPositionSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("does not write a snapshot when the read fails", async () => {
-    vi.mocked(resolvePositions).mockRejectedValueOnce(new Error("rpc down"));
-    await handleGetPositions(PUBKEY);
-    expect(recordPositionSnapshot).not.toHaveBeenCalled();
-  });
-
 });

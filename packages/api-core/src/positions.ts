@@ -1,7 +1,5 @@
 import { APP_NETWORK, isValidStellarAddress } from "@meridian/shared";
-import {
-  resolvePositions,
-} from "@meridian/stellar-sdk-helpers";
+import { resolvePositions } from "@meridian/stellar-sdk-helpers";
 import type { RouteResult } from "./types";
 
 export async function handleGetPositions(
